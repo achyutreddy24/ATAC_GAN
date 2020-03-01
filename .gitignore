@@ -104,3 +104,4 @@ ENV/
 .vscode
 data/
 images/
+output/

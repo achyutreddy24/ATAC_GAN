@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-df = pd.read_csv('../models/Run2_log.csv')
+df = pd.read_csv('../output/MNIST-6886085045213099351/log.csv')
 
 df = df.groupby('Epoch').agg({
         'DLoss': ['mean'],
