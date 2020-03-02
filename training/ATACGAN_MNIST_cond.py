@@ -17,7 +17,7 @@ import torch
 
 # Models
 from torchvision.models import vgg19
-from sys import path,maxsize
+from sys import path
 path.append("../utils")
 from models import LeNet5
 
@@ -49,11 +49,11 @@ output_dir="../output/MNIST-" + str(torch.random.initial_seed())
 d_real_loss_coeff = 0.7
 d_fake_loss_coeff = 0.3
 
-g_adv_loss_coeff = 2
-g_aux_loss_coeff = 1
-g_tar_loss_coeff = 1
+adv_loss_coeff = 2
+aux_loss_coeff = 1
+tar_loss_coeff = .08
 
-g_tar_loss_sigm_scalar = 10
+tar_loss_default = 22.2  # This is equal to the max possible tar_loss value
 
 # target classifier conditional constants
 adv_loss_threshold = 0.8
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     discriminator.apply(init_weights)
 
     target_classifier = load_LeNet5()
-    
+
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
 
@@ -183,15 +183,7 @@ if __name__ == "__main__":
         target_classifier = target_classifier.cuda()
         target_classifier_loss = target_classifier_loss.cuda()
 
-    
-    # Set max value for tar loss
-    pred_label = Variable(FloatTensor([[-99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999]]), requires_grad=False)
-    tar_label = Variable(LongTensor([0]), requires_grad=False)
-    g_tar_loss_max = target_classifier_loss(F.softmax(pred_label, dim=1), tar_label) * 1.2
-    print(g_tar_loss_max)
-    # Set sigmoid scalar to tar_loss_max / 5 if not set (or similar)
-    #tar_loss_sigm_scalar = tar_loss_max / 5
-        
+
     # Configure data loader
 
     os.makedirs("../data/mnist", exist_ok=True)
@@ -209,13 +201,21 @@ if __name__ == "__main__":
     )
 
 
+    # Loss helper
+
+    def get_target_loss(adv_loss, aux_loss, target_classifier_out, target_classification):
+        if (adv_loss < adv_loss_threshold and aux_loss < aux_loss_threshold):
+            return target_classifier_loss(target_classification, target_classification)
+        return Variable(FloatTensor([tar_loss_default]))
+
+
     # Set up logging/saving
 
     os.mkdir(output_dir)
     os.mkdir(output_dir + "/images")
     f = open(output_dir + '/log.csv', 'a')
     log_writer = csv.writer(f, delimiter=',')
-    log_writer.writerow(['Epoch', 'Batch', 'DLoss', 'DRealLoss', 'DRealAdvLoss', 'DRealAuxLoss', 'DFakeLoss', 'DFakeAdvLoss', 'DFakeAuxLoss', 'DValidReal', 'DValidFake', 'DAccReal', 'DAccFake', 'TAcc', 'GLoss', 'GAdvLoss', 'GAuxLoss', 'GTarLossRaw', 'GTarLossWeight', 'GTarLoss'])
+    log_writer.writerow(['Epoch', 'Batch', 'DLoss', 'DAcc', 'TarAcc', 'AdvLoss', 'AuxLoss', 'TarLoss', 'GLoss'])
 
     def sample_image(n_row, batches_done):
         """Saves a grid of generated digits ranging from 0 to n_classes"""
@@ -230,30 +230,10 @@ if __name__ == "__main__":
         gen_imgs = generator(z, labels, target_labels)
         save_image(gen_imgs.data, output_dir + "/images/%d.png" % batches_done, nrow=n_row, normalize=True)
 
-    running_d_real_validity = 0.0
-    running_d_fake_validity = 0.0
-    running_d_adv_loss_real = 0.0
-    running_d_aux_loss_real = 0.0
-    running_d_adv_loss_fake = 0.0
-    running_d_aux_loss_fake = 0.0
-    running_d_real_loss = 0.0
-    running_d_fake_loss = 0.0
-    running_d_loss = 0.0
-    running_d_acc_real = 0.0
-    running_d_acc_fake = 0.0
-    running_t_acc = 0.0
-    running_g_adv_loss = 0.0
-    running_g_aux_loss = 0.0
-    running_g_tar_loss_raw = 0.0
-    running_g_tar_loss = 0.0
-    running_g_tar_loss_weight = 0.0
-    running_g_loss = 0.0
-    
-    
+
     # Train
-    
+
     for epoch in range(n_epochs):
-        
         for i, (imgs, labels) in enumerate(dataloader):
 
             batch_size = imgs.shape[0]
@@ -275,25 +255,25 @@ if __name__ == "__main__":
 
             # Create noise, input labels, and target labels for generator input
             z = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, latent_dim))))
-            g_labels = Variable(LongTensor(np.random.randint(0, n_classes, batch_size)))
-            g_target_labels = Variable(LongTensor(np.random.randint(0, n_classes, batch_size)))
+            gen_labels = Variable(LongTensor(np.random.randint(0, n_classes, batch_size)))
+            gen_target_labels = Variable(LongTensor(np.random.randint(0, n_classes, batch_size)))
 
             # Generate images
-            x = generator(z, g_labels, g_target_labels)
+            gen_imgs = generator(z, gen_labels, gen_target_labels)
 
             # Run generated images through discriminator and target classifier
-            d_validities, d_pred_labels = discriminator(x)
-            t_pred_labels = F.softmax(target_classifier(x), dim=1)
+            validity, pred_label = discriminator(gen_imgs)
+            target_classifier_pred_label = target_classifier(gen_imgs)
 
-            # Generator loss components
-            g_adv_loss = g_adv_loss_coeff * adversarial_loss(d_validities, valid)
-            g_aux_loss = g_aux_loss_coeff * auxiliary_loss(d_pred_labels, g_labels)
-            g_tar_loss_raw = target_classifier_loss(t_pred_labels, g_target_labels)
-            g_tar_loss_weight = torch.sigmoid(g_tar_loss_sigm_scalar * (-g_adv_loss + adv_loss_threshold - g_aux_loss + aux_loss_threshold))
-            g_tar_loss = g_tar_loss_coeff * g_tar_loss_max * (1 - g_tar_loss_weight) + g_tar_loss_weight * g_tar_loss_raw
-            
-            # Total generator loss
-            g_loss = g_adv_loss + g_aux_loss + g_tar_loss
+            # Track target accuracy
+            t_acc = np.mean(np.argmax(target_classifier_pred_label.data.cpu().numpy(), axis=1) == gen_labels.data.cpu().numpy())
+
+            # Calculate generator loss
+            adv_loss = adv_loss_coeff * adversarial_loss(validity, valid)
+            aux_loss = aux_loss_coeff * auxiliary_loss(pred_label, gen_labels)
+            tar_loss = tar_loss_coeff * get_target_loss(adv_loss, aux_loss, target_classifier_pred_label, gen_target_labels)
+            g_loss = adv_loss + aux_loss + tar_loss
+
             g_loss.backward()
             optimizer_G.step()
 
@@ -306,108 +286,34 @@ if __name__ == "__main__":
 
             # Loss for real images
             real_pred, real_aux = discriminator(real_imgs)
-            d_adv_loss_real = adversarial_loss(real_pred, valid)
-            d_aux_loss_real = auxiliary_loss(real_aux, labels)
-            d_real_loss = (d_adv_loss_real + d_aux_loss_real) / 2
+            d_real_loss = (adversarial_loss(real_pred, valid) + auxiliary_loss(real_aux, labels)) / 2
 
-            # Loss for generated images
-            fake_pred, fake_aux = discriminator(x.detach())
-            d_adv_loss_fake = adversarial_loss(fake_pred, fake)
-            d_aux_loss_fake = auxiliary_loss(fake_aux, g_labels)
-            d_fake_loss = (d_adv_loss_fake + d_aux_loss_fake) / 2
+            # Loss for fake images
+            fake_pred, fake_aux = discriminator(gen_imgs.detach())
+            d_fake_loss = (adversarial_loss(fake_pred, fake) + auxiliary_loss(fake_aux, gen_labels)) / 2
 
             # Total discriminator loss
             d_loss = d_real_loss_coeff * d_real_loss + d_fake_loss_coeff * d_fake_loss
+
+            # Calculate discriminator accuracy
+            pred = np.concatenate([real_aux.data.cpu().numpy(), fake_aux.data.cpu().numpy()], axis=0)
+            gt = np.concatenate([labels.data.cpu().numpy(), gen_labels.data.cpu().numpy()], axis=0)
+            d_acc = np.mean(np.argmax(pred, axis=1) == gt)
+
             d_loss.backward()
             optimizer_D.step()
-            
-            
-            # =========
-            #  Logging
-            # =========
-            
-            # Track generator loss components
-            running_g_adv_loss += g_adv_loss.item()
-            running_g_aux_loss += g_aux_loss.item()
-            running_g_tar_loss_raw += g_tar_loss_raw.item()
-            running_g_tar_loss += g_tar_loss.item()
-            running_g_tar_loss_weight += g_tar_loss_weight
-            running_g_loss += g_loss.item()
-            
-            # Track target accuracy
-            t_acc = np.mean(np.argmax(t_pred_labels.detach().cpu().numpy()) == g_labels.detach().cpu().numpy())
-            running_t_acc += t_acc
-            
-            # Track discriminator loss
-            running_d_real_loss += d_real_loss.item()
-            running_d_fake_loss += d_fake_loss.item()
-            running_d_adv_loss_real += d_adv_loss_real.item()
-            running_d_aux_loss_real += d_aux_loss_real.item()
-            running_d_adv_loss_fake += d_adv_loss_fake.item()
-            running_d_aux_loss_fake += d_aux_loss_fake.item()
-            running_d_loss += d_loss.item()
-            
-            # Track dicriminator output
-            d_validity_fake = np.mean(d_validities.detach().cpu().numpy())
-            running_d_fake_validity += d_validity_fake
-            d_validity_real = np.mean(real_pred.detach().cpu().numpy())
-            running_d_real_validity += d_validity_real
-            
-            # Track discriminator-classifier accuracy
-            d_acc_real = np.mean(np.argmax(real_aux.detach().cpu().numpy()) == labels.detach().cpu().numpy())
-            d_acc_fake = np.mean(np.argmax(fake_aux.detach().cpu().numpy()) == g_labels.detach().cpu().numpy())
-            running_d_acc_real += d_acc_real
-            running_d_acc_fake += d_acc_fake
 
-            # Write to log file
-            log_writer.writerow([epoch, i, d_loss.item(), d_real_loss.item(), d_adv_loss_real.item(), d_aux_loss_real.item(), d_fake_loss.item(), d_adv_loss_fake.item(), d_aux_loss_fake.item(), d_validity_real, d_validity_fake, 100*d_acc_real, 100*d_acc_fake, 100*t_acc, g_loss.item(), g_adv_loss.item(), g_aux_loss.item(), g_tar_loss_raw.item(), g_tar_loss_weight, g_tar_loss.item()])
+            log_writer.writerow([epoch, i, d_loss.item(), 100*d_acc, 100*t_acc, adv_loss.item(), aux_loss.item(), tar_loss.item(), g_loss.item()])
 
-            
             batches_done = epoch * len(dataloader) + i
-            
-            # Save models
             if batches_done % save_interval == 0:
                 # Saves weights
                 torch.save(generator.state_dict(), output_dir + '/G')
                 torch.save(discriminator.state_dict(), output_dir + '/D')
-                
-            # Print information
             if batches_done % print_interval == 0:
-                #TEMP
-                print("d_acc_real", d_acc_real)
-                print("d_acc_fake", d_acc_fake)
-                #END
-                
-                p = float(print_interval)
-                print("==============================")
-                print("Epoch %d/%d, Batch %d/%d" % (epoch, n_epochs, i, len(dataloader)))
-                print("D - Real Valid: %f, Fake Valid: %f, Real Acc: %.2f%%, Fake Acc: %.2f%%" % (running_d_real_validity / p, running_d_fake_validity / p, running_d_acc_real * 100 / p, running_d_acc_fake * 100 / p))
-                print("D Loss: %f" % (running_d_loss / p))
-                print("   Real Loss: %f  (Adv: %f, Aux: %f)" % (running_d_real_loss / p, running_d_adv_loss_real / p, running_d_aux_loss_real / p))
-                print("   Fake Loss: %f  (Adv %f, Aux: %f)" % (running_d_fake_loss / p, running_d_adv_loss_fake / print_interval, running_d_aux_loss_fake / p))
-                print("G Loss: %f (Adv: %f, Aux: %f, Tar: %f)" % (running_g_loss / p, running_g_adv_loss / p, running_g_aux_loss  / p, running_g_tar_loss / p))
-                print("   Tar Raw: %f, Tar Weight: %f" % (running_g_tar_loss_raw / p, running_g_tar_loss_weight / p))
-                print("Tar Acc: %.2f%%" % (running_t_acc * 100 / p))
-                
-                running_d_real_validity = 0.0
-                running_d_fake_validity = 0.0
-                running_d_adv_loss_real = 0.0
-                running_d_aux_loss_real = 0.0
-                running_d_adv_loss_fake = 0.0
-                running_d_aux_loss_fake = 0.0
-                running_d_real_loss = 0.0
-                running_d_fake_loss = 0.0
-                running_d_loss = 0.0
-                running_d_acc_real = 0.0
-                running_d_acc_fake = 0.0
-                running_t_acc = 0.0
-                running_g_adv_loss = 0.0
-                running_g_aux_loss = 0.0
-                running_g_tar_loss_raw = 0.0
-                running_g_tar_loss = 0.0
-                running_g_tar_loss_weight = 0.0
-                running_g_loss = 0.0
-                
-            # Save sample images
+                print(
+                    "=====================\nEpoch %d/%d, Batch %d/%d\nD loss: %f, acc: %d%% // tar acc: %d%% // adv loss: %f, aux loss: %f, tar loss: %f"
+                    % (epoch, n_epochs, i, len(dataloader), d_loss.item(), 100 * d_acc, 100 * t_acc, adv_loss.item(), aux_loss.item(), tar_loss.item())
+                )
             if batches_done % sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
