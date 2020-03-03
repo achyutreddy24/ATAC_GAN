@@ -23,16 +23,15 @@ from models import LeNet5
 
 
 # Argument Parsing
-
-parser = argparse.ArgumentParser("ATAC-GAN MNIST")
+#TBD
 
 
 # Config
 
 cuda = True
 
-n_epochs=150
-batch_size=32
+n_epochs=500
+batch_size=24
 lr=0.0002
 b1=0.5
 b2=0.999
@@ -40,37 +39,38 @@ latent_dim=200
 n_classes=10
 img_size=28
 channels=1
-save_interval=500
-print_interval=500
-sample_interval=500
+save_interval=2000
+print_interval=2000
+sample_interval=2000
 
 output_dir="../output/MNIST-" + str(torch.random.initial_seed())
 
 d_real_loss_coeff = 0.7
 d_fake_loss_coeff = 0.3
 
-g_adv_loss_coeff = 2
+g_adv_loss_coeff = 3
 g_aux_loss_coeff = 1
 g_tar_loss_coeff = 1
 
-g_tar_loss_sigm_scalar = 10
+g_tar_loss_adv_sigm_scalar = 50
+g_tar_loss_aux_sigm_scalar = 50
 
 # target classifier conditional constants
-adv_loss_threshold = 0.8
-aux_loss_threshold = 1.47
+adv_loss_threshold = 1.12
+aux_loss_threshold = 1.475
 
 
 # Util
 
 def load_LeNet5():
     net = LeNet5()
-    
+
     # remove map location = cpu if using cuda
     net.load_state_dict(torch.load("../utils/models/trained_lenet5.pkl", map_location=torch.device('cpu')))
-    
+
     # set model to eval mode so nothing is changed
     net.eval()
-    
+
     return net
 
 def init_weights(m):
@@ -80,7 +80,7 @@ def init_weights(m):
     elif classname.find("BatchNorm2d") != -1:
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
-    
+
 
 # Models
 
@@ -150,7 +150,7 @@ class Discriminator(nn.Module):
         label = self.aux_layer(out)
 
         return validity, label
-    
+
 if __name__ == "__main__":
     # Loss functions
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     discriminator.apply(init_weights)
 
     target_classifier = load_LeNet5()
-    
+
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
 
@@ -183,15 +183,15 @@ if __name__ == "__main__":
         target_classifier = target_classifier.cuda()
         target_classifier_loss = target_classifier_loss.cuda()
 
-    
+
     # Set max value for tar loss
+
     pred_label = Variable(FloatTensor([[-99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999]]), requires_grad=False)
     tar_label = Variable(LongTensor([0]), requires_grad=False)
-    g_tar_loss_max = target_classifier_loss(F.softmax(pred_label, dim=1), tar_label) * 1.2
+    g_tar_loss_max = target_classifier_loss(F.softmax(pred_label, dim=1), tar_label)
     print(g_tar_loss_max)
-    # Set sigmoid scalar to tar_loss_max / 5 if not set (or similar)
-    #tar_loss_sigm_scalar = tar_loss_max / 5
-        
+
+
     # Configure data loader
 
     os.makedirs("../data/mnist", exist_ok=True)
@@ -213,6 +213,33 @@ if __name__ == "__main__":
 
     os.mkdir(output_dir)
     os.mkdir(output_dir + "/images")
+
+    f = open(output_dir + '/constants.txt', 'a')
+    f.write("cuda: {}\n".format(cuda))
+    f.write("batch_size: {}\n".format(batch_size))
+    f.write("lr: {}\n".format(lr))
+    f.write("adam_b1: {}\n".format(b1))
+    f.write("adam_b2: {}\n".format(b2))
+    f.write("latent_dim: {}\n".format(latent_dim))
+    f.write("n_classes: {}\n".format(n_classes))
+    f.write("img_size: {}\n".format(img_size))
+    f.write("channels: {}\n".format(channels))
+    f.write("save_interval: {}\n".format(save_interval))
+    f.write("print_interval: {}\n".format(print_interval))
+    f.write("sample_interval: {}\n".format(sample_interval))
+    f.write("output_dir: {}\n".format(output_dir))
+    f.write("d_real_loss_coeff: {}\n".format(d_real_loss_coeff))
+    f.write("d_fake_loss_coeff: {}\n".format(d_fake_loss_coeff))
+    f.write("g_adv_loss_coeff: {}\n".format(g_adv_loss_coeff))
+    f.write("g_aux_loss_coeff: {}\n".format(g_aux_loss_coeff))
+    f.write("g_tar_loss_coeff: {}\n".format(g_tar_loss_coeff))
+    f.write("g_tar_loss_adv_sigm_scalar: {}\n".format(g_tar_loss_adv_sigm_scalar))
+    f.write("g_tar_loss_aux_sigm_scalar: {}\n".format(g_tar_loss_aux_sigm_scalar))
+    f.write("g_tar_loss_max: {}\n".format(g_tar_loss_max))
+    f.write("adv_loss_threshold: {}\n".format(adv_loss_threshold))
+    f.write("aux_loss_threshold: {}\n".format(aux_loss_threshold))
+    f.close()
+
     f = open(output_dir + '/log.csv', 'a')
     log_writer = csv.writer(f, delimiter=',')
     log_writer.writerow(['Epoch', 'Batch', 'DLoss', 'DRealLoss', 'DRealAdvLoss', 'DRealAuxLoss', 'DFakeLoss', 'DFakeAdvLoss', 'DFakeAuxLoss', 'DValidReal', 'DValidFake', 'DAccReal', 'DAccFake', 'TAcc', 'GLoss', 'GAdvLoss', 'GAuxLoss', 'GTarLossRaw', 'GTarLossWeight', 'GTarLoss'])
@@ -248,12 +275,12 @@ if __name__ == "__main__":
     running_g_tar_loss = 0.0
     running_g_tar_loss_weight = 0.0
     running_g_loss = 0.0
-    
-    
+
+
     # Train
-    
+
     for epoch in range(n_epochs):
-        
+
         for i, (imgs, labels) in enumerate(dataloader):
 
             batch_size = imgs.shape[0]
@@ -289,9 +316,9 @@ if __name__ == "__main__":
             g_adv_loss = g_adv_loss_coeff * adversarial_loss(d_validities, valid)
             g_aux_loss = g_aux_loss_coeff * auxiliary_loss(d_pred_labels, g_labels)
             g_tar_loss_raw = target_classifier_loss(t_pred_labels, g_target_labels)
-            g_tar_loss_weight = torch.sigmoid(g_tar_loss_sigm_scalar * (-g_adv_loss + adv_loss_threshold - g_aux_loss + aux_loss_threshold))
+            g_tar_loss_weight = torch.sigmoid(g_tar_loss_adv_sigm_scalar * (-g_adv_loss + adv_loss_threshold)) * torch.sigmoid(g_tar_loss_aux_sigm_scalar * (-g_aux_loss + aux_loss_threshold))
             g_tar_loss = g_tar_loss_coeff * g_tar_loss_max * (1 - g_tar_loss_weight) + g_tar_loss_weight * g_tar_loss_raw
-            
+
             # Total generator loss
             g_loss = g_adv_loss + g_aux_loss + g_tar_loss
             g_loss.backward()
@@ -320,12 +347,12 @@ if __name__ == "__main__":
             d_loss = d_real_loss_coeff * d_real_loss + d_fake_loss_coeff * d_fake_loss
             d_loss.backward()
             optimizer_D.step()
-            
-            
+
+
             # =========
             #  Logging
             # =========
-            
+
             # Track generator loss components
             running_g_adv_loss += g_adv_loss.item()
             running_g_aux_loss += g_aux_loss.item()
@@ -333,11 +360,11 @@ if __name__ == "__main__":
             running_g_tar_loss += g_tar_loss.item()
             running_g_tar_loss_weight += g_tar_loss_weight
             running_g_loss += g_loss.item()
-            
+
             # Track target accuracy
-            t_acc = np.mean(np.argmax(t_pred_labels.detach().cpu().numpy()) == g_labels.detach().cpu().numpy())
+            t_acc = np.mean(np.argmax(t_pred_labels.detach().cpu().numpy(), axis=1) == g_labels.detach().cpu().numpy())
             running_t_acc += t_acc
-            
+
             # Track discriminator loss
             running_d_real_loss += d_real_loss.item()
             running_d_fake_loss += d_fake_loss.item()
@@ -346,38 +373,38 @@ if __name__ == "__main__":
             running_d_adv_loss_fake += d_adv_loss_fake.item()
             running_d_aux_loss_fake += d_aux_loss_fake.item()
             running_d_loss += d_loss.item()
-            
+
             # Track dicriminator output
             d_validity_fake = np.mean(d_validities.detach().cpu().numpy())
             running_d_fake_validity += d_validity_fake
             d_validity_real = np.mean(real_pred.detach().cpu().numpy())
             running_d_real_validity += d_validity_real
-            
+
             # Track discriminator-classifier accuracy
-            d_acc_real = np.mean(np.argmax(real_aux.detach().cpu().numpy()) == labels.detach().cpu().numpy())
-            d_acc_fake = np.mean(np.argmax(fake_aux.detach().cpu().numpy()) == g_labels.detach().cpu().numpy())
+            d_acc_real = np.mean(np.argmax(real_aux.detach().cpu().numpy(), axis=1) == labels.detach().cpu().numpy())
+            d_acc_fake = np.mean(np.argmax(fake_aux.detach().cpu().numpy(), axis=1) == g_labels.detach().cpu().numpy())
             running_d_acc_real += d_acc_real
             running_d_acc_fake += d_acc_fake
 
             # Write to log file
-            log_writer.writerow([epoch, i, d_loss.item(), d_real_loss.item(), d_adv_loss_real.item(), d_aux_loss_real.item(), d_fake_loss.item(), d_adv_loss_fake.item(), d_aux_loss_fake.item(), d_validity_real, d_validity_fake, 100*d_acc_real, 100*d_acc_fake, 100*t_acc, g_loss.item(), g_adv_loss.item(), g_aux_loss.item(), g_tar_loss_raw.item(), g_tar_loss_weight, g_tar_loss.item()])
+            log_writer.writerow([epoch, i, d_loss.item(), d_real_loss.item(), d_adv_loss_real.item(), d_aux_loss_real.item(), d_fake_loss.item(), d_adv_loss_fake.item(), d_aux_loss_fake.item(), d_validity_real, d_validity_fake, 100*d_acc_real, 100*d_acc_fake, 100*t_acc, g_loss.item(), g_adv_loss.item(), g_aux_loss.item(), g_tar_loss_raw.item(), g_tar_loss_weight.item(), g_tar_loss.item()])
 
-            
+
             batches_done = epoch * len(dataloader) + i
-            
+
             # Save models
             if batches_done % save_interval == 0:
                 # Saves weights
                 torch.save(generator.state_dict(), output_dir + '/G')
                 torch.save(discriminator.state_dict(), output_dir + '/D')
-                
+
             # Print information
             if batches_done % print_interval == 0:
                 #TEMP
-                print("d_acc_real", d_acc_real)
-                print("d_acc_fake", d_acc_fake)
+                #print("d_acc_real", d_acc_real)
+                #print("d_acc_fake", d_acc_fake)
                 #END
-                
+
                 p = float(print_interval)
                 print("==============================")
                 print("Epoch %d/%d, Batch %d/%d" % (epoch, n_epochs, i, len(dataloader)))
@@ -388,7 +415,7 @@ if __name__ == "__main__":
                 print("G Loss: %f (Adv: %f, Aux: %f, Tar: %f)" % (running_g_loss / p, running_g_adv_loss / p, running_g_aux_loss  / p, running_g_tar_loss / p))
                 print("   Tar Raw: %f, Tar Weight: %f" % (running_g_tar_loss_raw / p, running_g_tar_loss_weight / p))
                 print("Tar Acc: %.2f%%" % (running_t_acc * 100 / p))
-                
+
                 running_d_real_validity = 0.0
                 running_d_fake_validity = 0.0
                 running_d_adv_loss_real = 0.0
@@ -407,7 +434,7 @@ if __name__ == "__main__":
                 running_g_tar_loss = 0.0
                 running_g_tar_loss_weight = 0.0
                 running_g_loss = 0.0
-                
+
             # Save sample images
             if batches_done % sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
