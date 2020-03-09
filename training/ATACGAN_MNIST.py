@@ -30,7 +30,7 @@ from models import LeNet5
 
 cuda = True
 
-n_epochs=500
+n_epochs=5200
 batch_size=24
 lr=0.0002
 b1=0.5
@@ -41,12 +41,14 @@ img_size=28
 channels=1
 save_interval=2000
 print_interval=2000
-sample_interval=2000
+sample_interval=10000
 
 output_dir="../output/MNIST-" + str(torch.random.initial_seed())
 
-d_real_loss_coeff = 0.7
-d_fake_loss_coeff = 0.3
+d_real_adv_loss_coeff = 0.3
+d_real_aux_loss_coeff = 0.3
+d_fake_adv_loss_coeff = 0.3
+d_fake_aux_loss_coeff = 0.12
 
 g_adv_loss_coeff = 3
 g_aux_loss_coeff = 1
@@ -56,8 +58,8 @@ g_tar_loss_adv_sigm_scalar = 50
 g_tar_loss_aux_sigm_scalar = 50
 
 # target classifier conditional constants
-adv_loss_threshold = 1.12
-aux_loss_threshold = 1.475
+adv_loss_threshold = 2.13
+aux_loss_threshold = 1.48
 
 
 # Util
@@ -66,7 +68,7 @@ def load_LeNet5():
     net = LeNet5()
 
     # remove map location = cpu if using cuda
-    net.load_state_dict(torch.load("../utils/models/trained_lenet5.pkl", map_location=torch.device('cpu')))
+    net.load_state_dict(torch.load("../utils/models/trained_lenet5.pkl", map_location=torch.device('cuda' if cuda else 'cpu')))
 
     # set model to eval mode so nothing is changed
     net.eval()
@@ -163,6 +165,8 @@ if __name__ == "__main__":
 
     generator = Generator()
     discriminator = Discriminator()
+    #generator.load_state_dict(torch.load("../output/MNIST-459047257477249839/G"))
+    #discriminator.load_state_dict(torch.load("../output/MNIST-459047257477249839/D"))
 
     generator.apply(init_weights)
     discriminator.apply(init_weights)
@@ -180,8 +184,8 @@ if __name__ == "__main__":
         discriminator.cuda()
         adversarial_loss.cuda()
         auxiliary_loss.cuda()
-        target_classifier = target_classifier.cuda()
-        target_classifier_loss = target_classifier_loss.cuda()
+        target_classifier.cuda()
+        target_classifier_loss.cuda()
 
 
     # Set max value for tar loss
@@ -189,7 +193,6 @@ if __name__ == "__main__":
     pred_label = Variable(FloatTensor([[-99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999]]), requires_grad=False)
     tar_label = Variable(LongTensor([0]), requires_grad=False)
     g_tar_loss_max = target_classifier_loss(F.softmax(pred_label, dim=1), tar_label)
-    print(g_tar_loss_max)
 
 
     # Configure data loader
@@ -228,8 +231,10 @@ if __name__ == "__main__":
     f.write("print_interval: {}\n".format(print_interval))
     f.write("sample_interval: {}\n".format(sample_interval))
     f.write("output_dir: {}\n".format(output_dir))
-    f.write("d_real_loss_coeff: {}\n".format(d_real_loss_coeff))
-    f.write("d_fake_loss_coeff: {}\n".format(d_fake_loss_coeff))
+    f.write("d_real_adv_loss_coeff: {}\n".format(d_real_adv_loss_coeff))
+    f.write("d_real_aux_loss_coeff: {}\n".format(d_real_aux_loss_coeff))
+    f.write("d_fake_adv_loss_coeff: {}\n".format(d_fake_adv_loss_coeff))
+    f.write("d_real_aux_loss_coeff: {}\n".format(d_real_aux_loss_coeff))
     f.write("g_adv_loss_coeff: {}\n".format(g_adv_loss_coeff))
     f.write("g_aux_loss_coeff: {}\n".format(g_aux_loss_coeff))
     f.write("g_tar_loss_coeff: {}\n".format(g_tar_loss_coeff))
@@ -335,16 +340,16 @@ if __name__ == "__main__":
             real_pred, real_aux = discriminator(real_imgs)
             d_adv_loss_real = adversarial_loss(real_pred, valid)
             d_aux_loss_real = auxiliary_loss(real_aux, labels)
-            d_real_loss = (d_adv_loss_real + d_aux_loss_real) / 2
+            d_real_loss = d_real_adv_loss_coeff * d_adv_loss_real + d_real_aux_loss_coeff * d_aux_loss_real
 
             # Loss for generated images
             fake_pred, fake_aux = discriminator(x.detach())
             d_adv_loss_fake = adversarial_loss(fake_pred, fake)
             d_aux_loss_fake = auxiliary_loss(fake_aux, g_labels)
-            d_fake_loss = (d_adv_loss_fake + d_aux_loss_fake) / 2
+            d_fake_loss = d_fake_adv_loss_coeff * d_adv_loss_fake + d_fake_aux_loss_coeff * d_aux_loss_fake
 
             # Total discriminator loss
-            d_loss = d_real_loss_coeff * d_real_loss + d_fake_loss_coeff * d_fake_loss
+            d_loss = d_real_loss + d_fake_loss
             d_loss.backward()
             optimizer_D.step()
 
