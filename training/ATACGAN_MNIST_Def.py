@@ -16,9 +16,9 @@ import torch.nn.functional as F
 import torch
 
 # Models
-from sys import path,maxsize
+from sys import path
 path.append("../models")
-from MNIST_Classifiers import LeNet5
+from MNIST_Classifiers import Classifier_4Ca as Classifier
 from MNIST_Generators import Generator_3Ca as Generator
 from MNIST_Discriminators import Discriminator_Combined_4Ca as Discriminator
 
@@ -31,50 +31,48 @@ from MNIST_Discriminators import Discriminator_Combined_4Ca as Discriminator
 
 cuda = True
 
-n_epochs=5200
-batch_size=24
+training_set_size = 60000
+n_epochs=6000
+batch_size=64
 lr=0.0002
 b1=0.5
 b2=0.999
-latent_dim=200
 n_classes=10
+latent_dim=100
 img_size=28
 channels=1
-save_interval=2000
-print_interval=2000
-sample_interval=10000
+save_interval=1000
+print_interval=200
+sample_interval=2000
 
 output_dir="../output/MNIST-" + str(torch.random.initial_seed())
 
-d_real_adv_loss_coeff = 0.3
-d_real_aux_loss_coeff = 0.3
-d_fake_adv_loss_coeff = 0.3
-d_fake_aux_loss_coeff = 0.12
+d_real_adv_loss_coeff = 1
+d_fake_adv_loss_coeff = 1
+d_real_aux_loss_coeff = 1
+d_fake_aux_loss_coeff = 1
 
-g_adv_loss_coeff = 3
+g_adv_loss_coeff = 1
 g_aux_loss_coeff = 1
 g_tar_loss_coeff = 1
 
 g_tar_loss_adv_sigm_scalar = 50
 g_tar_loss_aux_sigm_scalar = 50
 
-# target classifier conditional constants
-adv_loss_threshold = 2.13
-aux_loss_threshold = 1.48
+adv_loss_threshold = 0.71
+aux_loss_threshold = 1.47
+
+load_g = False
+load_d = False
+load_g_path = ""
+load_d_path = ""
+load_t_path = "../output/MNIST-C60000-2290918716792143116/C"
 
 
 # Util
 
-def load_LeNet5():
-    net = LeNet5()
-
-    # remove map location = cpu if using cuda
-    net.load_state_dict(torch.load("../utils/models/trained_lenet5.pkl", map_location=torch.device('cuda' if cuda else 'cpu')))
-
-    # set model to eval mode so nothing is changed
-    net.eval()
-
-    return net
+FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 def init_weights(m):
     classname = m.__class__.__name__
@@ -84,6 +82,13 @@ def init_weights(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
 
+def load_model(m, o, path):
+    d = torch.device("cuda" if cuda else "cpu")
+    load = torch.load(path, map_location=d)
+    m.load_state_dict(load["model_state_dict"])
+    o.load_state_dict(load["optimizer_state_dict"])
+    m.to(d)
+        
 
 if __name__ == "__main__":
     # Loss functions
@@ -93,54 +98,65 @@ if __name__ == "__main__":
     target_classifier_loss = nn.CrossEntropyLoss()
 
 
-    # Initialize/Load Models
+    # Initialize Models
 
     generator = Generator(latent_dim)
     discriminator = Discriminator()
-    #generator.load_state_dict(torch.load("../output/MNIST-459047257477249839/G"))
-    #discriminator.load_state_dict(torch.load("../output/MNIST-459047257477249839/D"))
-
-    generator.apply(init_weights)
-    discriminator.apply(init_weights)
-
-    target_classifier = load_LeNet5()
-
+    target_classifier = Classifier() # Change if using different target classifier structure
+    
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
-
-    FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-    LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
-
+    
     if cuda:
         generator.cuda()
         discriminator.cuda()
+        target_classifier.cuda()
         adversarial_loss.cuda()
         auxiliary_loss.cuda()
-        target_classifier.cuda()
         target_classifier_loss.cuda()
+        
+    
+    # Load Models
+    
+    if (load_g):
+        load_model(generator, optimizer_G, load_g_path)
+    else:
+        generator.apply(init_weights)
+    if (load_d):
+        load_model(discriminator, optimizer_D, load_d_path)
+    else:
+        discriminator.apply(init_weights)
+
+    target_classifier.load_state_dict(torch.load(load_t_path, map_location=torch.device('cuda' if cuda else 'cpu'))["model_state_dict"])
+    target_classifier.eval()
+    for param in target_classifier.parameters():
+        param.requires_grad = False
 
 
-    # Set max value for tar loss
+    # Set max value for tar loss and c loss
 
-    pred_label = Variable(FloatTensor([[-99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999, 99999]]), requires_grad=False)
-    tar_label = Variable(LongTensor([0]), requires_grad=False)
-    g_tar_loss_max = target_classifier_loss(F.softmax(pred_label, dim=1), tar_label)
-
-
+    with torch.no_grad():
+        pred_label = F.softmax(Variable(FloatTensor([[0, 99999, 0, 0, 0, 0, 0, 0, 0, 0]]), requires_grad=False), dim=1)
+        tar_label = Variable(LongTensor([0]), requires_grad=False)
+        g_tar_loss_max = target_classifier_loss(pred_label, tar_label)
+        print("T labels:",pred_label)
+        print("G Tar Loss Max:",g_tar_loss_max)
+        
+    
     # Configure data loader
 
+    transform = transforms.Compose([transforms.Resize(img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+    
     os.makedirs("../data/mnist", exist_ok=True)
     dataloader = torch.utils.data.DataLoader(
         datasets.MNIST(
             "../data/mnist",
             train=True,
             download=True,
-            transform=transforms.Compose(
-                [transforms.Resize(img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
-            ),
+            transform=transform,
         ),
         batch_size=batch_size,
-        shuffle=True,
+        sampler=torch.utils.data.SubsetRandomSampler(list(range(training_set_size)))
     )
 
 
@@ -155,8 +171,8 @@ if __name__ == "__main__":
     f.write("lr: {}\n".format(lr))
     f.write("adam_b1: {}\n".format(b1))
     f.write("adam_b2: {}\n".format(b2))
-    f.write("latent_dim: {}\n".format(latent_dim))
     f.write("n_classes: {}\n".format(n_classes))
+    f.write("latent_dim: {}\n".format(latent_dim))
     f.write("img_size: {}\n".format(img_size))
     f.write("channels: {}\n".format(channels))
     f.write("save_interval: {}\n".format(save_interval))
@@ -175,6 +191,9 @@ if __name__ == "__main__":
     f.write("g_tar_loss_max: {}\n".format(g_tar_loss_max))
     f.write("adv_loss_threshold: {}\n".format(adv_loss_threshold))
     f.write("aux_loss_threshold: {}\n".format(aux_loss_threshold))
+    f.write("load_g_path: {}\n".format(load_g_path))
+    f.write("load_d_path: {}\n".format(load_d_path))
+    f.write("load_t_path: {}\n".format(load_t_path))
     f.close()
 
     f = open(output_dir + '/log.csv', 'a')
@@ -182,18 +201,18 @@ if __name__ == "__main__":
     log_writer.writerow(['Epoch', 'Batch', 'DLoss', 'DRealLoss', 'DRealAdvLoss', 'DRealAuxLoss', 'DFakeLoss', 'DFakeAdvLoss', 'DFakeAuxLoss', 'DValidReal', 'DValidFake', 'DAccReal', 'DAccFake', 'TAcc', 'GLoss', 'GAdvLoss', 'GAuxLoss', 'GTarLossRaw', 'GTarLossWeight', 'GTarLoss'])
 
     def sample_image(n_row, batches_done):
-        """Saves a grid of generated digits ranging from 0 to n_classes"""
-        # Sample noise
-        z = Variable(FloatTensor(np.random.normal(0, 1, (n_row ** 2, latent_dim))))
-        # Get labels ranging from 0 to n_classes for n rows
-        #labels = Variable(LongTensor(n_row ** 2).fill_(0), requires_grad=False)
-        labels = Variable(LongTensor(np.array([num for _ in range(n_row) for num in range(n_row)])), requires_grad=False)
-        #target_labels = Variable(LongTensor(n_row ** 2).fill_(0), requires_grad=False)
-        target_labels = Variable(LongTensor(np.array([num for num in range(n_row) for _ in range(n_row)])), requires_grad=False)
+        with torch.no_grad():
+            # Sample noise
+            z = Variable(FloatTensor(np.random.normal(0, 1, (n_row ** 2, latent_dim))))
+            
+            # Get labels ranging from 0 to n_classes for n rows
+            labels = Variable(LongTensor(np.array([num for _ in range(n_row) for num in range(n_row)])), requires_grad=False)
+            target_labels = Variable(LongTensor(np.array([num for num in range(n_row) for _ in range(n_row)])), requires_grad=False)
 
-        gen_imgs = generator(z, labels, target_labels)
-        save_image(gen_imgs.data, output_dir + "/images/%d.png" % batches_done, nrow=n_row, normalize=True)
-
+            # Generate images and save
+            gen_imgs = generator(z, labels, target_labels)
+            save_image(gen_imgs.data, output_dir + "/images/%d.png" % batches_done, nrow=n_row, normalize=True)
+        
     running_d_real_validity = 0.0
     running_d_fake_validity = 0.0
     running_d_adv_loss_real = 0.0
@@ -254,7 +273,7 @@ if __name__ == "__main__":
             g_aux_loss = g_aux_loss_coeff * auxiliary_loss(d_pred_labels, g_labels)
             g_tar_loss_raw = target_classifier_loss(t_pred_labels, g_target_labels)
             g_tar_loss_weight = torch.sigmoid(g_tar_loss_adv_sigm_scalar * (-g_adv_loss + adv_loss_threshold)) * torch.sigmoid(g_tar_loss_aux_sigm_scalar * (-g_aux_loss + aux_loss_threshold))
-            g_tar_loss = g_tar_loss_coeff * g_tar_loss_max * (1 - g_tar_loss_weight) + g_tar_loss_weight * g_tar_loss_raw
+            g_tar_loss = g_tar_loss_coeff * (g_tar_loss_max * (1 - g_tar_loss_weight) + g_tar_loss_weight * g_tar_loss_raw)
 
             # Total generator loss
             g_loss = g_adv_loss + g_aux_loss + g_tar_loss
@@ -326,14 +345,23 @@ if __name__ == "__main__":
             # Write to log file
             log_writer.writerow([epoch, i, d_loss.item(), d_real_loss.item(), d_adv_loss_real.item(), d_aux_loss_real.item(), d_fake_loss.item(), d_adv_loss_fake.item(), d_aux_loss_fake.item(), d_validity_real, d_validity_fake, 100*d_acc_real, 100*d_acc_fake, 100*t_acc, g_loss.item(), g_adv_loss.item(), g_aux_loss.item(), g_tar_loss_raw.item(), g_tar_loss_weight.item(), g_tar_loss.item()])
 
-
             batches_done = epoch * len(dataloader) + i
 
             # Save models
             if batches_done % save_interval == 0:
                 # Saves weights
-                torch.save(generator.state_dict(), output_dir + '/G')
-                torch.save(discriminator.state_dict(), output_dir + '/D')
+                torch.save({
+                    "epoch": epoch,
+                    "model_state_dict": generator.state_dict(),
+                    "optimizer_state_dict": optimizer_G.state_dict(),
+                    "loss": g_loss
+                }, output_dir + '/G')
+                torch.save({
+                    "epoch": epoch,
+                    "model_state_dict": discriminator.state_dict(),
+                    "optimizer_state_dict": optimizer_D.state_dict(),
+                    "loss": d_loss
+                }, output_dir + '/D')
 
             # Print information
             if batches_done % print_interval == 0:
@@ -370,3 +398,4 @@ if __name__ == "__main__":
             # Save sample images
             if batches_done % sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
+            

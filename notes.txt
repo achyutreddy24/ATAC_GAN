@@ -1,0 +1,2 @@
+To-Do:
+ - Add non-conv layer at end of generator structure to allow for more direct pixel manipulation?

@@ -16,10 +16,9 @@ import torch.nn.functional as F
 import torch
 
 # Models
-from torchvision.models import vgg19
-from sys import path,maxsize
-path.append("../utils")
-from models import LeNet5
+from sys import path
+path.append("../models")
+from MNIST_Classifiers import Classifier_4Ca as Classifier
 
 
 # Argument Parsing
@@ -28,21 +27,21 @@ from models import LeNet5
 
 # Config
 
-cuda = False
-training_set_size = 5000
-n_epochs=200
-batch_size=24
+cuda = True
+training_set_size = 60000
+n_epochs=600
+batch_size=64
 lr=0.0002
 b1=0.5
 b2=0.999
 n_classes=10
 img_size=28
 channels=1
-save_interval=200
-print_interval=200
-test_interval=500
+save_interval=1000
+print_interval=1000
+test_interval=1000
 
-output_dir="../output/MNIST-AC-" + str(torch.random.initial_seed())
+output_dir="../output/MNIST-C" + str(training_set_size) + "-" + str(torch.random.initial_seed())
 
 
 # Util
@@ -55,38 +54,6 @@ def init_weights(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
 
-
-# Models
-
-class Classifier(nn.Module):
-    def __init__(self):
-        super(Classifier, self).__init__()
-
-        def classifier_block(in_filters, out_filters, bn=True):
-            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), nn.LeakyReLU(0.2, inplace=True), nn.Dropout2d(0.25)]
-            if bn:
-                block.append(nn.BatchNorm2d(out_filters, 0.8))
-            return block
-
-        self.conv_blocks = nn.Sequential(
-            *classifier_block(channels, 16, bn=False),
-            *classifier_block(16, 32),
-            *classifier_block(32, 64),
-            *classifier_block(64, 128),
-        )
-
-        # The height and width of downsampled image
-        ds_size = 2#img_size // 2 ** 4
-
-        # Output layer
-        self.aux_layer = nn.Sequential(nn.Linear(128 * ds_size ** 2, n_classes), nn.Softmax())
-
-    def forward(self, img):
-        out = self.conv_blocks(img)
-        out = out.view(out.shape[0], -1)
-        label = self.aux_layer(out)
-
-        return label
 
 if __name__ == "__main__":
     # Loss function
@@ -149,6 +116,7 @@ if __name__ == "__main__":
     f.write("save_interval: {}\n".format(save_interval))
     f.write("print_interval: {}\n".format(print_interval))
     f.write("test_interval: {}\n".format(test_interval))
+    f.write("training_set_size: {}\n".format(training_set_size))
     f.write("output_dir: {}\n".format(output_dir))
     f.close()
 
@@ -161,17 +129,21 @@ if __name__ == "__main__":
 
     
     def test():
+        c.eval()
         total = 0
         correct = 0
         with torch.no_grad():
             for data in test_dataloader:
                 images, labels = data
+                images = Variable(images.type(FloatTensor))
+                labels = Variable(labels.type(LongTensor))
                 out = c(images)
                 _, predicted = torch.max(out.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
 
-        print('Accuracy of the network on the 10000 test images: %.2f%%' % (100 * correct / total))
+        print('Accuracy on the test set: %.2f%%' % (100 * correct / total))
+        c.train()
 
     # Train
 
@@ -205,10 +177,14 @@ if __name__ == "__main__":
 
             batches_done = epoch * len(dataloader) + i
 
-            # Save models
+            # Save model
             if batches_done % save_interval == 0:
-                # Saves weights
-                torch.save(c.state_dict(), output_dir + '/C')
+                torch.save({
+                    "epoch": epoch,
+                    "model_state_dict": c.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": l
+                }, output_dir + '/C')
 
             # Print information
             if batches_done % print_interval == 0:
