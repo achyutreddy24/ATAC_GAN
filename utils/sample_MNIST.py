@@ -1,28 +1,27 @@
 import torch
 from torchvision import datasets,transforms
+from torchvision.utils import save_image
 
-n = 5000
-batch_size = 64
+batch_size = 1
 #output_dir = "MNIST_Samples/"
 
-transform = transforms.Compose([transforms.Resize(28), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
-test_dataloader = torch.utils.data.DataLoader(
+dataloader = torch.utils.data.DataLoader(
     datasets.MNIST(
         "../data/mnist",
-        train=False,
+        train=True,
         download=True,
-        transform=transform,
+        transform=transforms.Compose(
+            [transforms.Resize(28), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+        ),
     ),
     batch_size=batch_size,
-    sampler=torch.utils.data.SubsetRandomSampler(list(range(n)))
+    shuffle=False,
 )
 
-totalLabels = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0}
-
-for data in test_dataloader:
-    _, labels = data
-    for label in labels:
-        #print(label.item())
-        totalLabels[label.item()] += 1
-
-print(totalLabels)
+i = 0
+for data in dataloader:
+    img, labels = data
+    save_image(torch.FloatTensor(img.data), "mnist_images/" + str(i) + ".png", nrow=1, normalize=True)
+    i+=1
+    if (i > 100):
+        break

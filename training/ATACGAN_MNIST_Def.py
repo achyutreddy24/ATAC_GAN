@@ -1,4 +1,4 @@
-import argparse
+cd import argparse
 import os
 import numpy as np
 import math
@@ -88,7 +88,7 @@ def load_model(m, o, path):
     m.load_state_dict(load["model_state_dict"])
     o.load_state_dict(load["optimizer_state_dict"])
     m.to(d)
-        
+
 
 if __name__ == "__main__":
     # Loss functions
@@ -103,10 +103,10 @@ if __name__ == "__main__":
     generator = Generator(latent_dim)
     discriminator = Discriminator()
     target_classifier = Classifier() # Change if using different target classifier structure
-    
+
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
-    
+
     if cuda:
         generator.cuda()
         discriminator.cuda()
@@ -114,10 +114,10 @@ if __name__ == "__main__":
         adversarial_loss.cuda()
         auxiliary_loss.cuda()
         target_classifier_loss.cuda()
-        
-    
+
+
     # Load Models
-    
+
     if (load_g):
         load_model(generator, optimizer_G, load_g_path)
     else:
@@ -141,12 +141,12 @@ if __name__ == "__main__":
         g_tar_loss_max = target_classifier_loss(pred_label, tar_label)
         print("T labels:",pred_label)
         print("G Tar Loss Max:",g_tar_loss_max)
-        
-    
+
+
     # Configure data loader
 
     transform = transforms.Compose([transforms.Resize(img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
-    
+
     os.makedirs("../data/mnist", exist_ok=True)
     dataloader = torch.utils.data.DataLoader(
         datasets.MNIST(
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             # Sample noise
             z = Variable(FloatTensor(np.random.normal(0, 1, (n_row ** 2, latent_dim))))
-            
+
             # Get labels ranging from 0 to n_classes for n rows
             labels = Variable(LongTensor(np.array([num for _ in range(n_row) for num in range(n_row)])), requires_grad=False)
             target_labels = Variable(LongTensor(np.array([num for num in range(n_row) for _ in range(n_row)])), requires_grad=False)
@@ -212,7 +212,7 @@ if __name__ == "__main__":
             # Generate images and save
             gen_imgs = generator(z, labels, target_labels)
             save_image(gen_imgs.data, output_dir + "/images/%d.png" % batches_done, nrow=n_row, normalize=True)
-        
+
     running_d_real_validity = 0.0
     running_d_fake_validity = 0.0
     running_d_adv_loss_real = 0.0
@@ -398,4 +398,3 @@ if __name__ == "__main__":
             # Save sample images
             if batches_done % sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
-            

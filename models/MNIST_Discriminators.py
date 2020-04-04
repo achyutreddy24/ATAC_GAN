@@ -20,7 +20,7 @@ class Discriminator_Combined_4Ca(nn.Module):
         )
 
         # The height and width of downsampled image
-        ds_size = 2#img_size // 2 ** 4
+        ds_size = 2
 
         # Output layers
         self.adv_layer = nn.Sequential(nn.Linear(128 * ds_size ** 2, 1), nn.Sigmoid())
