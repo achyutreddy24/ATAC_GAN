@@ -1,6 +1,10 @@
 import torch
 from torch import nn
 
+#------------------
+# Model Definitions
+#------------------
+
 class Classifier_4Ca(nn.Module):
     def __init__(self):
         super(Classifier_4Ca, self).__init__()
@@ -49,3 +53,23 @@ class LeNet5(nn.Module):
         out = self.relu3(self.linear1(out))
         out = self.linear2(out)
         return out
+
+    
+class MNIST_Classifier_Factory(object):
+    #--------------------------
+    # Model Selection Functions
+    #--------------------------
+
+    MODELS = {
+        'LeNet5': LeNet5,
+        'Classifier_4Ca': Classifier_4Ca
+    }
+    
+    @classmethod
+    def supported_models(cls):
+        return cls.MODELS.keys()
+    
+    @classmethod
+    def get_model(cls, name):
+        return cls.MODELS[name]
+    

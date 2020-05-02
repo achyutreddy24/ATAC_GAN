@@ -102,6 +102,8 @@ ENV/
 
 # other
 .vscode
+
+# Project specific
 data/
 images/
 output/

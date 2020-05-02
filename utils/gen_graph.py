@@ -15,7 +15,8 @@ args = parser.parse_args()
 if (args.csv_dir[len(args.csv_dir)-1] != '/'):
     args.csv_dir += '/'
 
-df = pd.read_csv(args.csv_dir + '/log.csv')
+#df = pd.read_csv(args.csv_dir) + '/log.csv')
+df = pd.read_csv(args.csv_dir + '/RunSimple1_log_graph.csv')
 cols = list(df.columns)
 cols.remove("Epoch")
 cols.remove("Batch")

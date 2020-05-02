@@ -26,7 +26,8 @@ classifier = atacgan.Classifier()
 classifier.load_state_dict(torch.load(args.model_dir + "C", map_location=torch.device('cuda' if args.cuda else 'cpu'))["model_state_dict"])
 classifier.eval()
 
-transform = transforms.Compose([transforms.Resize(28), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+#transform = transforms.Compose([transforms.Resize(28), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0], [0.5])])
 test_dataloader = torch.utils.data.DataLoader(
     datasets.MNIST(
         "../data/mnist",

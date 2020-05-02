@@ -4,6 +4,7 @@ and creates adversarial examples using the Fast Gradient Sign Method. Here we us
 it would also be possible to provide a pretrained model to the ART classifier.
 The parameters are chosen for reduced computational requirements of the script and not optimised for accuracy.
 """
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,27 +13,28 @@ import numpy as np
 
 from art.attacks import FastGradientMethod
 from art.classifiers import PyTorchClassifier
-from art.utils import load_mnist
 
 from torchvision.utils import save_image
+from torchvision import transforms
+from torchvision import datasets
 
 from sys import path
 path.append("../models")
 from MNIST_Classifiers import Classifier_4Ca as Classifier
 
 #load_path = "../output/MNIST-CuG-5356196018254729871/C"
-load_path = "../output/MNIST-C60000-2290918716792143116/C"
+load_path = "../output/CuG"
 
 # Step 1: Load the MNIST dataset
 
-(x_train, y_train), (x_test, y_test), min_pixel_value, max_pixel_value = load_mnist()
-
-# Step 1a: Swap axes to PyTorch's NCHW format
-
-x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
-x_test = np.swapaxes(x_test, 2, 3).astype(np.float32)
-x_train = np.swapaxes(x_train, 1, 3).astype(np.float32)
-x_train = np.swapaxes(x_train, 2, 3).astype(np.float32)
+transform = transforms.Compose([transforms.Resize(28), transforms.ToTensor(),transforms.Normalize([0.5], [0.5])])
+os.makedirs("../data/mnist", exist_ok=True)
+data = datasets.MNIST(
+        "../data/mnist",
+        train=False,
+        download=True,
+        transform=transform)
+testloader = torch.utils.data.DataLoader(data, batch_size=128, shuffle=True)
 
 # Step 2: Create the model
 
@@ -53,7 +55,7 @@ optimizer.load_state_dict(load["optimizer_state_dict"])
 
 classifier = PyTorchClassifier(
     model=model,
-    clip_values=(min_pixel_value, max_pixel_value),
+    clip_values=(-1, 1),
     loss=criterion,
     optimizer=optimizer,
     input_shape=(1, 28, 28),
@@ -61,44 +63,28 @@ classifier = PyTorchClassifier(
 )
 classifier.set_learning_phase(False)
 
-# TEMP
-
-i = 0
-for (img, label) in zip(x_test, y_test):
-    save_image(torch.FloatTensor(img), "images/" + str(i) + "-" + str(np.argmax(label)) + ".png", nrow=1, normalize=True)
-    i+=1
-    if (i > 100):
-        break
-
 # Step 4: Evaluate the ART classifier on benign test examples
 
-predictions = classifier.predict(x_test)
-'''
-print(predictions[0])
-print(y_test[0])
-print()
-print(predictions[1])
-print(y_test[1])
-print()
-print(predictions[2])
-print(y_test[2])
-print()
-print(predictions[3])
-print(y_test[3])
-print()
-print(predictions[4])
-print(y_test[4])
-print()
-'''
-accuracy = np.sum(np.argmax(predictions, axis=1) == np.argmax(y_test, axis=1)) / len(y_test)
-print("Accuracy on benign test examples: {}%".format(accuracy * 100))
+count = 0
+ben_sum = 0
+att_sum = 0
+for i, (imgs, labels) in enumerate(testloader):
+    predictions = classifier.predict(imgs)
+    accuracy = np.sum(np.argmax(predictions, axis=1) == labels.numpy()) / 128
+    #print("Accuracy on benign test examples: {}%".format(accuracy * 100))
+    ben_sum += accuracy
 
-# Step 5: Generate adversarial test examples
-attack = FastGradientMethod(classifier=classifier, eps=0.2)
-x_test_adv = attack.generate(x=x_test)
+    # Step 5: Generate adversarial test examples
+    attack = FastGradientMethod(classifier=classifier, eps=0.2)
+    x_test_adv = attack.generate(x=imgs)
 
-# Step 6: Evaluate the ART classifier on adversarial test examples
+    # Step 6: Evaluate the ART classifier on adversarial test examples
 
-predictions = classifier.predict(x_test_adv)
-accuracy = np.sum(np.argmax(predictions, axis=1) == np.argmax(y_test, axis=1)) / len(y_test)
-print("Accuracy on adversarial test examples: {}%".format(accuracy * 100))
+    predictions = classifier.predict(x_test_adv)
+    accuracy = np.sum(np.argmax(predictions, axis=1) == labels.numpy()) / 128
+    #print("Accuracy on adversarial test examples: {}%".format(accuracy * 100))
+    att_sum += accuracy
+
+    count += 1
+print("Benign:", ben_sum/count)
+print("Attack:", att_sum/count)

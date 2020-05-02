@@ -37,7 +37,7 @@ class Discriminator_Combined_4Ca(nn.Module):
 
 class Discriminator_4Ca(nn.Module):
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super(Discriminator_4Ca, self).__init__()
 
         def discriminator_block(in_filters, out_filters, bn=True):
             block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), nn.LeakyReLU(0.2, inplace=True), nn.Dropout2d(0.25)]
@@ -64,3 +64,21 @@ class Discriminator_4Ca(nn.Module):
         validity = self.adv_layer(out)
 
         return validity
+
+class MNIST_Discriminator_Factory(object):
+    #--------------------------
+    # Model Selection Functions
+    #--------------------------
+
+    MODELS = {
+        'Discriminator_4Ca': Discriminator_4Ca,
+        'Discriminator_Combined_4Ca': Discriminator_Combined_4Ca
+    }
+    
+    @classmethod
+    def supported_models(cls):
+        return cls.MODELS.keys()
+    
+    @classmethod
+    def get_model(cls, name):
+        return cls.MODELS[name]

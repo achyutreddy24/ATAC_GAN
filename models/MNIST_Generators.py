@@ -30,3 +30,20 @@ class Generator_3Ca(nn.Module):
         out = out.view(out.shape[0], 128, 7, 7)
         img = self.conv_blocks(out)
         return img
+    
+class MNIST_Generator_Factory(object):
+    #--------------------------
+    # Model Selection Functions
+    #--------------------------
+
+    MODELS = {
+        'Generator_3Ca': Generator_3Ca,
+    }
+    
+    @classmethod
+    def supported_models(cls):
+        return cls.MODELS.keys()
+    
+    @classmethod
+    def get_model(cls, name):
+        return cls.MODELS[name]
