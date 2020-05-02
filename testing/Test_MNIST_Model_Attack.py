@@ -42,7 +42,6 @@ if __name__ == "__main__":
         opt.run_name = opt.model_dir.split('/')[-1]
         opt.model_dir = os.path.abspath(opt.model_dir) 
 
-    print(opt.model_dir)
     if (not os.path.isdir(opt.model_dir+"/results")):
         os.mkdir(opt.model_dir+"/results")
 
