@@ -18,7 +18,7 @@ parser.add_argument("--g", default=False, action="store_true", help="Plot all ge
 parser.add_argument("--d", default=False, action="store_true", help="Plot all discriminator loss info")
 parser.add_argument("--acc", default=False, action="store_true", help="Plot all accuracy info")
 parser.add_argument("--all", default=False, action="store_true", help="Plot all info")
-parser.add_argument("--loss", default=True, action="store_true", help="Plot all loss info")
+parser.add_argument("--loss", default=False, action="store_true", help="Plot all loss info")
 parser.add_argument("--valid", default=False, action="store_true", help="Plot all validity info")
 args = parser.parse_args()
 

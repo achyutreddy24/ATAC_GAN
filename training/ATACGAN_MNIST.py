@@ -58,11 +58,12 @@ parser.add_argument("--adv_loss_threshold", type=float, default=2.13)
 parser.add_argument("--aux_loss_threshold", type=float, default=1.48)
 
 parser.add_argument("--resume", type=bool, default=False, help="Resumes training from output_dir")
-parser.add_argument("--verbose", type=bool, default=True, help="Print logs during training")
 
 parser.add_argument("--save_interval", type=int, default=2000, help="How frequent model weights are saved")
-parser.add_argument("--print_interval", type=int, default=2000, help="Print frequency when verbose")
-parser.add_argument("--sample_interval", type=int, default=2000, help="How frequent sample images are saved")
+parser.add_argument("--print_interval", type=int, default=2000, help="Print frequency, -1 to disable")
+parser.add_argument("--sample_interval", type=int, default=2000, help="Image save frequency, -1 to disable")
+
+parser.add_argument("--tb", default=False, action="store_true", help="Enable tensorboard logging under output/runs/name")
 
 # Model Choices
 parser.add_argument(
@@ -123,14 +124,6 @@ def init_weights(m):
     elif classname.find("BatchNorm2d") != -1:
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
-        
-#def get_current_model_names():
-#    # Make sure to these are accurate. Evaluating on the wrong models will produce useless results.
-#    # Adding these values opt so they will be saved in case future changes affect reproducability.
-#    
-#    return {'g_model': "Generator_3Ca",
-#            'd_model': "Discriminator_Combined_4Ca",
-#            't_model': "LeNet5"}
 
 
 if __name__ == "__main__":
@@ -229,12 +222,18 @@ if __name__ == "__main__":
     if opt.resume == False:
         os.mkdir(opt.output_dir)
         os.mkdir(opt.output_dir + "/images")
+        
+    # Setup tensorboard logging
+    if opt.tb:
+        from torch.utils.tensorboard import SummaryWriter
+        tb_writer = SummaryWriter(p+"/output/runs/"+opt.name)
+        #tb_writer.add_graph((generator))
 
     # Save command line constants to file
     with open(opt.output_dir + '/constants.csv', "w") as f:
         w = csv.writer(f)
         for key, val in vars(opt).items():
-            if key in ['output_dir', 'verbose', 'resume']:
+            if key in ['output_dir', 'resume']:
                 continue
             w.writerow([key, val])
 
@@ -266,10 +265,11 @@ if __name__ == "__main__":
     running_g_tar_loss_weight = 0.0
     running_g_loss = 0.0
     
-    # Starting real log
+    # Starting log
     f = open(opt.output_dir + '/log.csv', 'a')
     log_writer = csv.writer(f, delimiter=',')
-    if opt.resume == False: # Log file header
+    if opt.resume == False: 
+        # Log file header
         log_writer.writerow(['Epoch', 'Batch', 'DLoss', 'DRealLoss', 'DRealAdvLoss', 'DRealAuxLoss', 'DFakeLoss', 'DFakeAdvLoss', 'DFakeAuxLoss', 'DValidReal', 'DValidFake', 'DAccReal', 'DAccFake', 'TAcc', 'GLoss', 'GAdvLoss', 'GAuxLoss', 'GTarLossRaw', 'GTarLossWeight', 'GTarLoss'])
 
     # Find starting point for training
@@ -377,6 +377,11 @@ if __name__ == "__main__":
 
             # Total number of batches over all epochs
             batches_done = epoch * len(dataloader) + i
+            
+            # Write loss components to tensorboard directory
+            if opt.tb:
+                tb_writer.add_scalars('G-D loss', {'d_loss': d_loss, 'g_loss': g_loss}, batches_done)
+                tb_writer.add_scalars('G loss components', {'adv_loss': g_adv_loss, 'g_aux_loss': g_aux_loss, 'g_tar_loss': g_tar_loss}, batches_done)
 
             # Save model weights
             if batches_done % opt.save_interval == 0:
@@ -384,11 +389,11 @@ if __name__ == "__main__":
                 torch.save(discriminator.state_dict(), opt.output_dir + '/D')
                 
             # Save sample images
-            if batches_done % opt.sample_interval == 0:
+            if opt.sample_interval != 0 and batches_done % opt.sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
 
-            # Print information only when verbose is true
-            if opt.verbose: # Only for printing during training
+            # Print information only when print interval is not -1
+            if opt.print_interval != -1:
                 # Running discriminator-classifier accuracy
                 running_d_acc_real += d_acc_real
                 running_d_acc_fake += d_acc_fake
@@ -449,3 +454,7 @@ if __name__ == "__main__":
                     running_g_tar_loss = 0.0
                     running_g_tar_loss_weight = 0.0
                     running_g_loss = 0.0
+    
+    print("Finished training model in", opt.output_dir)
+    torch.save(generator.state_dict(), opt.output_dir + '/G')
+    torch.save(discriminator.state_dict(), opt.output_dir + '/D')
