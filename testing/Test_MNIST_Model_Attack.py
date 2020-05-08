@@ -11,7 +11,7 @@ import torch
 # Hack to get imports, fix later
 from sys import path
 p = os.path.abspath("")
-root_dir = "AdversarialRobustness" # Root directory of project
+root_dir = "ATAC_GAN" # Root directory of project
 p = p[:p.rindex(root_dir)+len(root_dir)]
 if p not in path:
     path.append(p)
