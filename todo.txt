@@ -1,0 +1,4 @@
+-Change saving/loading to include epoch,state_dict,optimizer,loss
+-Change a bunch of options to be in epochs instead of batches (e.g. save_interval, sample interval as in ATACGAN_MNIST_Def_New.py)
+-Add checkpointing
+-Make one .py for attack and one .py for defense that can take any dataset and models as parameters

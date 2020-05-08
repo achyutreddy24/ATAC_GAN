@@ -6,7 +6,7 @@ import pandas as pd
 from sys import path
 import os
 p = os.path.abspath("")
-root_dir = "AdversarialRobustness" # Root directory of project
+root_dir = "ATAC_GAN" # Root directory of project
 p = p[:p.rindex(root_dir)+len(root_dir)]
 if p not in path:
     path.append(p)
@@ -34,11 +34,11 @@ elif args.name != "":
     args.csv_dir=p+"/output/" + args.name
 else:
     args.run_name = args.csv_dir.split('/')[-1]
-    args.csv_dir = os.path.abspath(args.csv_dir) 
+    args.csv_dir = os.path.abspath(args.csv_dir)
 
 if (not os.path.isdir(args.csv_dir+"/graphs")):
     os.mkdir(args.csv_dir+"/graphs")
-    
+
 output_dir = args.csv_dir+"/graphs"
 
 df = pd.read_csv(args.csv_dir + '/log.csv')
@@ -54,14 +54,14 @@ for label in cols:
     valid = "Valid" in label
     if (
         (args.all) or
-        (label[0] == 'G' and args.g and not acc) or 
+        (label[0] == 'G' and args.g and not acc) or
         (label[0] == 'D' and args.d and not acc) or
         (acc and args.acc) or
         (loss and args.loss) or
         (valid and args.valid)
     ):
         plt.plot(df.index, df[label], label=label)
-    
+
 plt.xlabel('Epoch')
 plt.title('Mean per Epoch')
 plt.legend()

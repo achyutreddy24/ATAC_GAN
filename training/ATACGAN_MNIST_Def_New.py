@@ -14,6 +14,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+from collections import deque
+
 # Models
 # Hack to get imports, fix later
 from sys import path
@@ -25,14 +27,13 @@ if p not in path:
 #from models.MNIST_Classifiers import LeNet5 as Target
 #from models.MNIST_Generators import Generator_3Ca as Generator
 #from models.MNIST_Discriminators import Discriminator_Combined_4Ca as Discriminator
-from models.MNIST_Classifiers import MNIST_Classifier_Factory as Targets
 from models.MNIST_Generators import MNIST_Generator_Factory as Generators
 from models.MNIST_Discriminators import MNIST_Discriminator_Factory as Discriminators
 
 # Argument Parsing
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=200, help="Number of epochs to train")
-parser.add_argument("--batch_size", type=int, default=64, help="Size of the batches")
+parser.add_argument("--n_epochs", type=int, default=2000, help="Number of epochs to train")
+parser.add_argument("--batch_size", type=int, default=128, help="Size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -59,20 +60,15 @@ parser.add_argument("--aux_loss_threshold", type=float, default=1.48)
 
 parser.add_argument("--resume", type=bool, default=False, help="Resumes training from output_dir")
 
-parser.add_argument("--save_interval", type=int, default=2000, help="How frequent model weights are saved")
-parser.add_argument("--print_interval", type=int, default=2000, help="Print frequency, -1 to disable")
-parser.add_argument("--sample_interval", type=int, default=2000, help="Image save frequency, -1 to disable")
+parser.add_argument("--save_interval", type=int, default=2, help="How frequent model weights are saved (epochs)")
+parser.add_argument("--checkpoint_interval", type=int, default=50, help="How frequent model weights are saved in checkpoints (i.e. not overwritten) (epochs)")
+parser.add_argument("--print_interval", type=int, default=2000, help="Print frequency, -1 to disable (batches)")
+parser.add_argument("--sample_interval", type=int, default=10, help="Image save frequency, -1 to disable (epochs)")
+parser.add_argument("--tar_update_interval", type=int, default=1, help="Interval to update target (epochs)")
+parser.add_argument("--tar_update_offset", type=int, default=25, help="Distance in epochs between target and auxiliary classifier (epochs)")
 
 parser.add_argument("--tb", default=False, action="store_true", help="Enable tensorboard logging under output/runs/name")
 
-# Model Choices
-parser.add_argument(
-    '--t_model',
-    type=str,
-    help='Name of model to train',
-    choices=Targets.supported_models(),
-    required=True,
-)
 # Model Choices
 parser.add_argument(
     '--d_model',
@@ -97,15 +93,6 @@ channels=1 # Number of image channels
 
 # Util
 
-def load_target(name):
-    net = Targets.get_model(name)()
-    net.load_state_dict(torch.load(p+"/models/saves/MNIST_LeNet5")) # Generalize this
-
-    # set model to eval mode so nothing is changed
-    net.eval()
-    for param in net.parameters():
-        param.requires_grad = False
-    return net
 
 def load_discriminator(name, load_weights=False, path=None):
     net = Discriminators.get_model(name)()
@@ -153,7 +140,7 @@ if __name__ == "__main__":
 
     # Setting run name and correct output directory for all possible inputs
     if opt.output_dir == "" and opt.name == "":
-        opt.name = "MNIST-" + str(torch.random.initial_seed())
+        opt.name = "MNIST-Def-" + str(torch.random.initial_seed())
         opt.output_dir=p+"/output/" + opt.name
     elif opt.output_dir == "":
         opt.output_dir=p+"/output/" + opt.name
@@ -174,12 +161,16 @@ if __name__ == "__main__":
     # Loading models (will load previous weights if resuming)
     generator = load_generator(opt.g_model, opt.latent_dim, opt.resume, path=opt.output_dir)
     discriminator = load_discriminator(opt.d_model, opt.resume, path=opt.output_dir)
-    target_classifier = load_target(opt.t_model)
+    target_classifier = load_discriminator(opt.d_model, opt.resume, path=opt.output_dir)
+    target_classifier.eval()
+    for param in target_classifier.parameters():
+        param.requires_grad = False
 
     # Initializing weights
     if opt.resume == False:
         generator.apply(init_weights)
         discriminator.apply(init_weights)
+        target_classifier.apply(init_weights)
 
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -224,6 +215,7 @@ if __name__ == "__main__":
     if opt.resume == False:
         os.mkdir(opt.output_dir)
         os.mkdir(opt.output_dir + "/images")
+        os.mkdir(opt.output_dir + "/checkpoints")
 
     # Setup tensorboard logging
     if opt.tb:
@@ -246,6 +238,15 @@ if __name__ == "__main__":
         target_labels = Variable(LongTensor(np.array([num for num in range(n_row) for _ in range(n_row)])), requires_grad=False)
         gen_imgs = generator(z, labels, target_labels)
         save_image(gen_imgs.data, opt.output_dir + "/images/%d.png" % batches_done, nrow=n_row, normalize=True)
+
+    def save_model(epoch, model, optimizer, loss, path):
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "loss": loss
+        }, path)
+
 
     # Only used for print messages
     running_d_real_validity = 0.0
@@ -286,6 +287,10 @@ if __name__ == "__main__":
         start_batch = int(last_line[1]) # Epoch last run ended on
 
 
+    # Storage for last tar_update_offset auxiliary Classifiers
+    recent_aux = deque()
+
+
     # Training
     print("Started training model in", opt.output_dir)
 
@@ -320,7 +325,7 @@ if __name__ == "__main__":
 
             # Run generated images through discriminator and target classifier
             d_validities, d_pred_labels = discriminator(x)
-            t_pred_labels = F.softmax(target_classifier(x), dim=1)
+            _, t_pred_labels = target_classifier(x)
 
             # Generator loss components
             g_adv_loss = opt.g_adv_loss_coeff * adversarial_loss(d_validities, valid)
@@ -381,18 +386,29 @@ if __name__ == "__main__":
             batches_done = epoch * len(dataloader) + i
 
             # Write loss components to tensorboard directory
+            if epoch % opt.tar_update_interval == 0:
+                if (epoch >= opt.tar_update_offset):
+                    target_classifier.load_state_dict(recent_aux.popleft())
+                recent_aux.append(discriminator.state_dict())
+
             if opt.tb:
                 tb_writer.add_scalars('G-D loss', {'d_loss': d_loss, 'g_loss': g_loss}, batches_done)
                 tb_writer.add_scalars('G loss components', {'adv_loss': g_adv_loss, 'g_aux_loss': g_aux_loss, 'g_tar_loss': g_tar_loss}, batches_done)
 
             # Save model weights
-            if batches_done % opt.save_interval == 0:
-                torch.save(generator.state_dict(), opt.output_dir + '/G')
-                torch.save(discriminator.state_dict(), opt.output_dir + '/D')
+            if epoch % opt.save_interval == 0:
+                save_model(epoch, generator, optimizer_G, g_loss, opt.output_dir + "/G")
+                save_model(epoch, discriminator, optimizer_D, d_loss, opt.output_dir + "/D")
 
             # Save sample images
-            if opt.sample_interval != 0 and batches_done % opt.sample_interval == 0:
+            if opt.sample_interval != 0 and epoch % opt.sample_interval == 0:
                 sample_image(n_row=10, batches_done=batches_done)
+
+            if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
+                dir = "{}/checkpoints/{}".format(opt.output_dir, batches_done)
+                os.mkdir(dir)
+                save_model(epoch, generator, optimizer_G, g_loss, dir + "/G")
+                save_model(epoch, discriminator, optimizer_D, d_loss, dir + "/D")
 
             # Print information only when print interval is not -1
             if opt.print_interval != -1:

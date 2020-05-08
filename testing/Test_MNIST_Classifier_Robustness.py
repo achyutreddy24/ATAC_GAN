@@ -20,10 +20,12 @@ from torchvision import datasets
 
 from sys import path
 path.append("../models")
-from MNIST_Classifiers import Classifier_4Ca as Classifier
+from MNIST_Discriminators import MNIST_Discriminator_Factory as Discriminators
+from MNIST_Classifiers import MNIST_Classifier_Factory as Classifiers
 
 #load_path = "../output/MNIST-CuG-5356196018254729871/C"
-load_path = "../output/CuG"
+load_path = "../output/MNIST-RecursiveDef2/D"
+#load_path = "../output/MNIST-C60000-2290918716792143116/C"
 
 # Step 1: Load the MNIST dataset
 
@@ -39,9 +41,14 @@ testloader = torch.utils.data.DataLoader(data, batch_size=128, shuffle=True)
 # Step 2: Create the model
 
 # NOTE::: Maybe remove softmax from structure to improve attack effectiveness?
-model = Classifier()
-load = torch.load(load_path, map_location="cpu")
-model.load_state_dict(load["model_state_dict"])
+model = Discriminators.get_model("Discriminator_Combined_4Ca")()
+model.load_state_dict(torch.load(load_path, map_location="cpu"))
+
+#model = Classifiers.get_model("Classifier_4Ca")()
+#load = torch.load(load_path, map_location="cpu")
+#model.load_state_dict(load["model_state_dict"])
+
+
 model.eval()
 model.to("cpu")
 
@@ -49,7 +56,6 @@ model.to("cpu")
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
-optimizer.load_state_dict(load["optimizer_state_dict"])
 
 # Step 3: Create the ART classifier
 
@@ -75,7 +81,7 @@ for i, (imgs, labels) in enumerate(testloader):
     ben_sum += accuracy
 
     # Step 5: Generate adversarial test examples
-    attack = FastGradientMethod(classifier=classifier, eps=0.2)
+    attack = FastGradientMethod(classifier=classifier)
     x_test_adv = attack.generate(x=imgs)
 
     # Step 6: Evaluate the ART classifier on adversarial test examples
@@ -84,6 +90,8 @@ for i, (imgs, labels) in enumerate(testloader):
     accuracy = np.sum(np.argmax(predictions, axis=1) == labels.numpy()) / 128
     #print("Accuracy on adversarial test examples: {}%".format(accuracy * 100))
     att_sum += accuracy
+
+    print(count)
 
     count += 1
 print("Benign:", ben_sum/count)

@@ -74,11 +74,11 @@ class MNIST_Discriminator_Factory(object):
         'Discriminator_4Ca': Discriminator_4Ca,
         'Discriminator_Combined_4Ca': Discriminator_Combined_4Ca
     }
-    
+
     @classmethod
     def supported_models(cls):
         return cls.MODELS.keys()
-    
+
     @classmethod
     def get_model(cls, name):
         return cls.MODELS[name]
