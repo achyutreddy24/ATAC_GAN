@@ -196,7 +196,7 @@ if __name__ == "__main__":
     os.makedirs(p+"/data/mnist", exist_ok=True)
     dataloader = torch.utils.data.DataLoader(
         datasets.MNIST(
-            p+"/storage/data/mnist",
+            "/storage/data/mnist",
             train=True,
             download=True,
             transform=transforms.Compose(
