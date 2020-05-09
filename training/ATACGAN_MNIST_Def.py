@@ -198,7 +198,7 @@ if __name__ == "__main__":
         datasets.MNIST(
             "/datasets/mnist",
             train=True,
-            download=True,
+            download=False,
             transform=transforms.Compose(
                 [transforms.Resize(img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
             ),
