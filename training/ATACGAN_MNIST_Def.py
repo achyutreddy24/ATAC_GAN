@@ -217,7 +217,7 @@ if __name__ == "__main__":
     # Setup tensorboard logging
     if opt.tb:
         from torch.utils.tensorboard import SummaryWriter
-        tb_writer = SummaryWriter(p+"/output/runs/"+opt.name)
+        tb_writer = SummaryWriter(opt.output_dir+"/tb")
         #tb_writer.add_graph((generator))
 
     # Save command line constants to file
