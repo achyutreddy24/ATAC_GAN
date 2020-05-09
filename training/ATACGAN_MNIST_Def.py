@@ -193,10 +193,10 @@ if __name__ == "__main__":
 
     # Configure data loader
 
-    os.makedirs(p+"/data/mnist", exist_ok=True)
+    os.makedirs("/storage/data/mnist", exist_ok=True)
     dataloader = torch.utils.data.DataLoader(
         datasets.MNIST(
-            "/datasets/mnist",
+            "/storage/data/mnist",
             train=True,
             download=False,
             transform=transforms.Compose(
