@@ -17,11 +17,8 @@ import torch
 from collections import deque
 
 # Models
-# Hack to get imports, fix later
+p = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 from sys import path
-p = os.path.abspath("")
-root_dir = "ATAC_GAN" # Root directory of project
-p = p[:p.rindex(root_dir)+len(root_dir)]
 if p not in path:
     path.append(p)
 #from models.MNIST_Classifiers import LeNet5 as Target
