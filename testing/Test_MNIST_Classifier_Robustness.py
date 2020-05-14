@@ -24,8 +24,8 @@ from MNIST_Discriminators import MNIST_Discriminator_Factory as Discriminators
 from MNIST_Classifiers import MNIST_Classifier_Factory as Classifiers
 
 #load_path = "../output/MNIST-CuG-5356196018254729871/C"
-#load_path = "../output/MNIST-RecursiveDef1/D"
-load_path = "../output/MNIST-RecursiveDef2/checkpoints/516368/D"
+load_path = "../output/MNIST-RecursiveDef1/D"
+#load_path = "../output/MNIST-RecursiveDef2/checkpoints/516368/D"
 #load_path = "../output/MNIST-C60000-2290918716792143116/C"
 
 # Step 1: Load the MNIST dataset
@@ -42,12 +42,12 @@ testloader = torch.utils.data.DataLoader(data, batch_size=128, shuffle=True)
 # Step 2: Create the model
 
 # NOTE::: Maybe remove softmax from structure to improve attack effectiveness?
-#model = Discriminators.get_model("Discriminator_Combined_4Ca")()
-#model.load_state_dict(torch.load(load_path, map_location="cpu"))
-
 model = Discriminators.get_model("Discriminator_Combined_4Ca")()
-load = torch.load(load_path, map_location="cpu")
-model.load_state_dict(load["model_state_dict"])
+model.load_state_dict(torch.load(load_path, map_location="cpu"))
+
+#model = Classifiers.get_model("Classifier_4Ca")()
+#load = torch.load(load_path, map_location="cpu")
+#model.load_state_dict(load["model_state_dict"])
 
 model.eval()
 model.to("cpu")

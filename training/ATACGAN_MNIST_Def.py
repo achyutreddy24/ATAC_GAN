@@ -30,7 +30,7 @@ from models.MNIST_Discriminators import MNIST_Discriminator_Factory as Discrimin
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=1200, help="Number of epochs to train")
 parser.add_argument("--batch_size", type=int, default=128, help="Size of the batches")
-parser.add_argument("--old_batch_size", type=int, default=48, help="Size of the batches")
+parser.add_argument("--old_batch_size", type=int, default=64, help="Size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -44,8 +44,8 @@ parser.add_argument("--d_real_adv_loss_coeff", type=float, default=0.3)
 parser.add_argument("--d_real_aux_loss_coeff", type=float, default=0.3)
 parser.add_argument("--d_fake_adv_loss_coeff", type=float, default=0.3)
 parser.add_argument("--d_fake_aux_loss_coeff", type=float, default=0.1)
-parser.add_argument("--d_old_adv_loss_coeff", type=float, default=0.04)
-parser.add_argument("--d_old_aux_loss_coeff", type=float, default=0.04)
+parser.add_argument("--d_old_adv_loss_coeff", type=float, default=0.05)
+parser.add_argument("--d_old_aux_loss_coeff", type=float, default=0.05)
 
 parser.add_argument("--g_adv_loss_coeff", type=float, default=3.0)
 parser.add_argument("--g_aux_loss_coeff", type=float, default=1.0)
@@ -364,15 +364,16 @@ if __name__ == "__main__":
             d_old_aux_loss = 0.0
             old_batch_size_split = 0
             if len(old_generators) > 0:
-                old_batch_size_split = opt.old_batch_size / len(old_generators)
+                old_batch_size_split = opt.old_batch_size // len(old_generators)
+            fake = Variable(FloatTensor(old_batch_size_split, 1).fill_(0.0), requires_grad=False)
             for g in old_generators:
                 z_o = Variable(FloatTensor(np.random.normal(0, 1, (old_batch_size_split, opt.latent_dim))))
                 g_labels_o = Variable(LongTensor(np.random.randint(0, n_classes, old_batch_size_split)))
                 g_target_labels_o = Variable(LongTensor(np.random.randint(0, n_classes, old_batch_size_split)))
-                old_x = old_generator(z_o, g_labels_o, g_target_labels_o)
+                old_x = g(z_o, g_labels_o, g_target_labels_o)
                 old_pred, old_aux = discriminator(old_x)
                 d_old_adv_loss += adversarial_loss(old_pred, fake)
-                d_old_aux_loss += auxiliary_loss(old_aux, fake)
+                d_old_aux_loss += auxiliary_loss(old_aux, g_labels_o)
             if len(old_generators) > 0:
                 d_old_adv_loss /= len(old_generators)
                 d_old_aux_loss /= len(old_generators)
@@ -491,6 +492,8 @@ if __name__ == "__main__":
         if epoch % opt.tar_update_interval == 0 and epoch > 0:
             g = Generators.get_model(opt.g_model)(opt.latent_dim)
             g.load_state_dict(generator.state_dict())
+            if cuda:
+                g.cuda()
             old_generators.append(g)
 
         # Save model weights

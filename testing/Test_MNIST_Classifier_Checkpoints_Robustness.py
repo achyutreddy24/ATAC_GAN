@@ -23,7 +23,7 @@ path.append("../models")
 from MNIST_Discriminators import MNIST_Discriminator_Factory as Discriminators
 from MNIST_Classifiers import MNIST_Classifier_Factory as Classifiers
 
-checkpoint_dir = "../output/MNIST-RecursiveDef2/checkpoints"
+checkpoint_dir = "../output/MNIST-RecursiveDefWithOld1/checkpoints"
 
 # Step 1: Load the MNIST dataset
 
@@ -38,17 +38,16 @@ testloader = torch.utils.data.DataLoader(data, batch_size=128, shuffle=True)
 
 model = Discriminators.get_model("Discriminator_Combined_4Ca")()
 
-checkpoints = [x[0] for x in os.walk(checkpoint_dir)]
-checkpoints.pop(0)
-attack_accs = []
-benign_accs = []
+checkpoints = sorted([int(x) for x in os.listdir(checkpoint_dir)])
+att_accs = []
+ben_accs = []
 
 print(checkpoints)
 
 for checkpoint in checkpoints:
     print(checkpoint)
 
-    load = torch.load(checkpoint + "/D", map_location="cpu")
+    load = torch.load(checkpoint_dir + "/" + str(checkpoint) + "/D", map_location="cpu")
     model.load_state_dict(load["model_state_dict"])
     model.eval()
     model.to("cpu")
@@ -89,10 +88,19 @@ for checkpoint in checkpoints:
 
         count += 1
 
-    print("Benign:", ben_sum/count)
-    print("Attack:", att_sum/count)
-    benign_accs.append(ben_sum/count)
-    attack_accs.append(att_sum/count)
+    ben_acc = ben_sum / count
+    att_acc = att_sum / count
+    print("Benign:", ben_acc)
+    print("Attack:", att_acc)
+    ben_accs.append(ben_acc)
+    att_accs.append(att_acc)
 
-print(benign_accs)
-print(attack_accs)
+for i in range(0,len(checkpoints)):
+    print(checkpoints[i])
+    print("Benign Acc: {}".format(ben_accs[i]))
+    print("Attack Acc: {}".format(att_accs[i]))
+
+print("List of benign accuracies:")
+print(ben_accs)
+print("\nList of attack accuracies:")
+print(att_accs)
