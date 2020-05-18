@@ -24,7 +24,8 @@ from MNIST_Discriminators import MNIST_Discriminator_Factory as Discriminators
 from MNIST_Classifiers import MNIST_Classifier_Factory as Classifiers
 
 #load_path = "../output/MNIST-CuG-5356196018254729871/C"
-load_path = "../output/MNIST-RecursiveDef2/D"
+load_path = "../output/MNIST-RecursiveDef1/D"
+#load_path = "../output/MNIST-RecursiveDef2/checkpoints/516368/D"
 #load_path = "../output/MNIST-C60000-2290918716792143116/C"
 
 # Step 1: Load the MNIST dataset
@@ -48,9 +49,9 @@ model.load_state_dict(torch.load(load_path, map_location="cpu"))
 #load = torch.load(load_path, map_location="cpu")
 #model.load_state_dict(load["model_state_dict"])
 
-
 model.eval()
 model.to("cpu")
+
 
 # Step 2a: Define the loss function and the optimizer
 

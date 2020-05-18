@@ -14,7 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-from collections import deque
 
 # Models
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -29,20 +28,24 @@ from models.MNIST_Discriminators import MNIST_Discriminator_Factory as Discrimin
 
 # Argument Parsing
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=2000, help="Number of epochs to train")
+parser.add_argument("--n_epochs", type=int, default=1200, help="Number of epochs to train")
 parser.add_argument("--batch_size", type=int, default=128, help="Size of the batches")
+parser.add_argument("--old_batch_size", type=int, default=64, help="Size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--latent_dim", type=int, default=100, help="Dimension of latent space")
 parser.add_argument("--output_dir", type=str, default="", help="Leave blank to auto-generate under /output")
+parser.add_argument("--data_dir", type=str, default=p+"/data/mnist", help="Leave blank to use [root]/data/mnist")
 
 parser.add_argument("--name", type=str, default="", help="Leave blank to auto-generate name")
 
 parser.add_argument("--d_real_adv_loss_coeff", type=float, default=0.3)
 parser.add_argument("--d_real_aux_loss_coeff", type=float, default=0.3)
 parser.add_argument("--d_fake_adv_loss_coeff", type=float, default=0.3)
-parser.add_argument("--d_fake_aux_loss_coeff", type=float, default=0.12)
+parser.add_argument("--d_fake_aux_loss_coeff", type=float, default=0.1)
+parser.add_argument("--d_old_adv_loss_coeff", type=float, default=0.05)
+parser.add_argument("--d_old_aux_loss_coeff", type=float, default=0.05)
 
 parser.add_argument("--g_adv_loss_coeff", type=float, default=3.0)
 parser.add_argument("--g_aux_loss_coeff", type=float, default=1.0)
@@ -51,18 +54,17 @@ parser.add_argument("--g_tar_loss_coeff", type=float, default=1.0)
 parser.add_argument("--g_tar_loss_adv_sigm_scalar", type=int, default=50)
 parser.add_argument("--g_tar_loss_aux_sigm_scalar", type=int, default=50)
 
-# target classifier conditional constants
 parser.add_argument("--adv_loss_threshold", type=float, default=2.13)
 parser.add_argument("--aux_loss_threshold", type=float, default=1.48)
 
 parser.add_argument("--resume", type=bool, default=False, help="Resumes training from output_dir")
 
-parser.add_argument("--save_interval", type=int, default=2, help="How frequent model weights are saved (epochs)")
-parser.add_argument("--checkpoint_interval", type=int, default=50, help="How frequent model weights are saved in checkpoints (i.e. not overwritten) (epochs)")
+parser.add_argument("--save_interval", type=int, default=20, help="How frequent model weights are saved (epochs)")
+parser.add_argument("--checkpoint_interval", type=int, default=60, help="How frequent model weights are saved in checkpoints (i.e. not overwritten) (epochs)")
 parser.add_argument("--print_interval", type=int, default=2000, help="Print frequency, -1 to disable (batches)")
 parser.add_argument("--sample_interval", type=int, default=10, help="Image save frequency, -1 to disable (epochs)")
-parser.add_argument("--tar_update_interval", type=int, default=1, help="Interval to update target (epochs)")
-parser.add_argument("--tar_update_offset", type=int, default=25, help="Distance in epochs between target and auxiliary classifier (epochs)")
+parser.add_argument("--tar_update_interval", type=int, default=60, help="Interval to update target to discriminator (epochs)")
+parser.add_argument("--gen_store_interval", type=int, default=60, help="Interval to store generators to prevent forgetting (epochs)")
 
 parser.add_argument("--tb", default=False, action="store_true", help="Enable tensorboard logging under output/runs/name")
 
@@ -83,13 +85,14 @@ parser.add_argument(
     required=True,
 )
 
+
 # MNIST Constants
 n_classes=10 # Number of classes for dataset
 img_size=28 # Size of each image dimension
 channels=1 # Number of image channels
 
-# Util
 
+# Util
 
 def load_discriminator(name, load_weights=False, path=None):
     net = Discriminators.get_model(name)()
@@ -217,7 +220,7 @@ if __name__ == "__main__":
     # Setup tensorboard logging
     if opt.tb:
         from torch.utils.tensorboard import SummaryWriter
-        tb_writer = SummaryWriter(p+"/output/runs/"+opt.name)
+        tb_writer = SummaryWriter(opt.output_dir+"/tb")
         #tb_writer.add_graph((generator))
 
     # Save command line constants to file
@@ -245,15 +248,17 @@ if __name__ == "__main__":
         }, path)
 
 
-    # Only used for print messages
     running_d_real_validity = 0.0
     running_d_fake_validity = 0.0
     running_d_adv_loss_real = 0.0
     running_d_aux_loss_real = 0.0
     running_d_adv_loss_fake = 0.0
     running_d_aux_loss_fake = 0.0
+    running_d_adv_loss_old = 0.0
+    running_d_aux_loss_old = 0.0
     running_d_real_loss = 0.0
     running_d_fake_loss = 0.0
+    running_d_old_loss = 0.0
     running_d_loss = 0.0
     running_d_acc_real = 0.0
     running_d_acc_fake = 0.0
@@ -284,8 +289,7 @@ if __name__ == "__main__":
         start_batch = int(last_line[1]) # Epoch last run ended on
 
 
-    # Storage for last tar_update_offset auxiliary Classifiers
-    recent_aux = deque()
+    old_generators = []
 
 
     # Training
@@ -355,8 +359,28 @@ if __name__ == "__main__":
             d_aux_loss_fake = auxiliary_loss(fake_aux, g_labels)
             d_fake_loss = opt.d_fake_adv_loss_coeff * d_adv_loss_fake + opt.d_fake_aux_loss_coeff * d_aux_loss_fake
 
+            # Loss for old generated images
+            d_old_adv_loss = 0.0
+            d_old_aux_loss = 0.0
+            old_batch_size_split = 0
+            if len(old_generators) > 0:
+                old_batch_size_split = opt.old_batch_size // len(old_generators)
+            fake = Variable(FloatTensor(old_batch_size_split, 1).fill_(0.0), requires_grad=False)
+            for g in old_generators:
+                z_o = Variable(FloatTensor(np.random.normal(0, 1, (old_batch_size_split, opt.latent_dim))))
+                g_labels_o = Variable(LongTensor(np.random.randint(0, n_classes, old_batch_size_split)))
+                g_target_labels_o = Variable(LongTensor(np.random.randint(0, n_classes, old_batch_size_split)))
+                old_x = g(z_o, g_labels_o, g_target_labels_o)
+                old_pred, old_aux = discriminator(old_x)
+                d_old_adv_loss += adversarial_loss(old_pred, fake)
+                d_old_aux_loss += auxiliary_loss(old_aux, g_labels_o)
+            if len(old_generators) > 0:
+                d_old_adv_loss /= len(old_generators)
+                d_old_aux_loss /= len(old_generators)
+            d_old_loss = opt.d_old_adv_loss_coeff * d_old_adv_loss + opt.d_old_aux_loss_coeff * d_old_aux_loss
+
             # Total discriminator loss
-            d_loss = d_real_loss + d_fake_loss
+            d_loss = d_real_loss + d_fake_loss + d_old_loss
             d_loss.backward()
             optimizer_D.step()
 
@@ -404,10 +428,13 @@ if __name__ == "__main__":
                 # Running discriminator loss
                 running_d_real_loss += d_real_loss.item()
                 running_d_fake_loss += d_fake_loss.item()
+                running_d_old_loss += d_old_loss
                 running_d_adv_loss_real += d_adv_loss_real.item()
                 running_d_aux_loss_real += d_aux_loss_real.item()
                 running_d_adv_loss_fake += d_adv_loss_fake.item()
                 running_d_aux_loss_fake += d_aux_loss_fake.item()
+                running_d_adv_loss_old += d_old_adv_loss
+                running_d_aux_loss_old += d_old_aux_loss
                 running_d_loss += d_loss.item()
 
                 # Running generator loss components
@@ -427,6 +454,7 @@ if __name__ == "__main__":
                     print("D Loss: %f" % (running_d_loss / p))
                     print("   Real Loss: %f  (Adv: %f, Aux: %f)" % (running_d_real_loss / p, running_d_adv_loss_real / p, running_d_aux_loss_real / p))
                     print("   Fake Loss: %f  (Adv %f, Aux: %f)" % (running_d_fake_loss / p, running_d_adv_loss_fake / p, running_d_aux_loss_fake / p))
+                    print("   Old Loss: %f  (Adv %f, Aux: %f)" % (running_d_old_loss / p, running_d_adv_loss_old / p, running_d_aux_loss_old / p))
                     print("G Loss: %f (Adv: %f, Aux: %f, Tar: %f)" % (running_g_loss / p, running_g_adv_loss / p, running_g_aux_loss  / p, running_g_tar_loss / p))
                     print("   Tar Raw: %f, Tar Weight: %f" % (running_g_tar_loss_raw / p, running_g_tar_loss_weight / p))
                     print("Tar Acc: %.2f%%" % (running_t_acc * 100 / p))
@@ -438,8 +466,11 @@ if __name__ == "__main__":
                     running_d_aux_loss_real = 0.0
                     running_d_adv_loss_fake = 0.0
                     running_d_aux_loss_fake = 0.0
+                    running_d_adv_loss_old = 0.0
+                    running_d_aux_loss_old = 0.0
                     running_d_real_loss = 0.0
                     running_d_fake_loss = 0.0
+                    running_d_old_loss = 0.0
                     running_d_loss = 0.0
                     running_d_acc_real = 0.0
                     running_d_acc_fake = 0.0
@@ -451,11 +482,19 @@ if __name__ == "__main__":
                     running_g_tar_loss_weight = 0.0
                     running_g_loss = 0.0
 
+        # Updates after each epoch
+
         # Update target classifier
         if epoch % opt.tar_update_interval == 0:
-            if (epoch >= opt.tar_update_offset):
-                target_classifier.load_state_dict(recent_aux.popleft())
-            recent_aux.append(discriminator.state_dict())
+            target_classifier.load_state_dict(discriminator.state_dict())
+
+        # Store generator for continued training
+        if epoch % opt.tar_update_interval == 0 and epoch > 0:
+            g = Generators.get_model(opt.g_model)(opt.latent_dim)
+            g.load_state_dict(generator.state_dict())
+            if cuda:
+                g.cuda()
+            old_generators.append(g)
 
         # Save model weights
         if epoch % opt.save_interval == 0:
